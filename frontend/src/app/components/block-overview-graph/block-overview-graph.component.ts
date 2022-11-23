@@ -1,5 +1,5 @@
-import { Component, ElementRef, ViewChild, HostListener, Input, Output, EventEmitter, NgZone, AfterViewInit, OnDestroy } from '@angular/core';
-import { TransactionStripped } from 'src/app/interfaces/websocket.interface';
+import { Component, ElementRef, ViewChild, HostListener, Input, Output, EventEmitter, NgZone, AfterViewInit, OnDestroy, OnChanges } from '@angular/core';
+import { TransactionStripped } from '../../interfaces/websocket.interface';
 import { FastVertexArray } from './fast-vertex-array';
 import BlockScene from './block-scene';
 import TxSprite from './tx-sprite';
@@ -11,13 +11,16 @@ import { Position } from './sprite-types';
   templateUrl: './block-overview-graph.component.html',
   styleUrls: ['./block-overview-graph.component.scss'],
 })
-export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy {
+export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy, OnChanges {
   @Input() isLoading: boolean;
   @Input() resolution: number;
   @Input() blockLimit: number;
   @Input() orientation = 'left';
   @Input() flip = true;
+  @Input() disableSpinner = false;
+  @Input() mirrorTxid: string | void;
   @Output() txClickEvent = new EventEmitter<TransactionStripped>();
+  @Output() txHoverEvent = new EventEmitter<string>();
   @Output() readyEvent = new EventEmitter();
 
   @ViewChild('blockCanvas')
@@ -36,6 +39,7 @@ export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy {
   scene: BlockScene;
   hoverTx: TxView | void;
   selectedTx: TxView | void;
+  mirrorTx: TxView | void;
   tooltipPosition: Position;
 
   readyNextFrame = false;
@@ -56,6 +60,17 @@ export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy {
     this.resizeCanvas();
   }
 
+  ngOnChanges(changes): void {
+    if (changes.orientation || changes.flip) {
+      if (this.scene) {
+        this.scene.setOrientation(this.orientation, this.flip);
+      }
+    }
+    if (changes.mirrorTxid) {
+      this.setMirror(this.mirrorTxid);
+    }
+  }
+
   ngOnDestroy(): void {
     if (this.animationFrameRequest) {
       cancelAnimationFrame(this.animationFrameRequest);
@@ -67,6 +82,7 @@ export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy {
     this.exit(direction);
     this.hoverTx = null;
     this.selectedTx = null;
+    this.onTxHover(null);
     this.start();
   }
 
@@ -172,7 +188,7 @@ export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy {
       this.gl.viewport(0, 0, this.displayWidth, this.displayHeight);
     }
     if (this.scene) {
-      this.scene.resize({ width: this.displayWidth, height: this.displayHeight });
+      this.scene.resize({ width: this.displayWidth, height: this.displayHeight, animate: false });
       this.start();
     } else {
       this.scene = new BlockScene({ width: this.displayWidth, height: this.displayHeight, resolution: this.resolution,
@@ -292,6 +308,7 @@ export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy {
       }
       this.hoverTx = null;
       this.selectedTx = null;
+      this.onTxHover(null);
     }
   }
 
@@ -343,21 +360,36 @@ export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy {
             this.selectedTx = selected;
           } else {
             this.hoverTx = selected;
+            this.onTxHover(this.hoverTx ? this.hoverTx.txid : null);
           }
         } else {
           if (clicked) {
             this.selectedTx = null;
           }
           this.hoverTx = null;
+          this.onTxHover(null);
         }
       } else if (clicked) {
         if (selected === this.selectedTx) {
           this.hoverTx = this.selectedTx;
           this.selectedTx = null;
+          this.onTxHover(this.hoverTx ? this.hoverTx.txid : null);
         } else {
           this.selectedTx = selected;
         }
       }
+    }
+  }
+
+  setMirror(txid: string | void) {
+    if (this.mirrorTx) {
+      this.scene.setHover(this.mirrorTx, false);
+      this.start();
+    }
+    if (txid && this.scene.txs[txid]) {
+      this.mirrorTx = this.scene.txs[txid];
+      this.scene.setHover(this.mirrorTx, true);
+      this.start();
     }
   }
 
@@ -368,6 +400,10 @@ export class BlockOverviewGraphComponent implements AfterViewInit, OnDestroy {
     if (selected && selected.txid) {
       this.txClickEvent.emit(selected);
     }
+  }
+
+  onTxHover(hoverId: string) {
+    this.txHoverEvent.emit(hoverId);
   }
 }
 

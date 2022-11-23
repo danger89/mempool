@@ -46,18 +46,44 @@ const routes = {
           return `Lightning Channel: ${path[0]}`;
         }
       },
+      nodes: {
+        routes: {
+          isp: {
+            render: true,
+            params: 1,
+            getTitle(path) {
+              return `Lightning ISP: ${path[0]}`;
+            }
+          }
+        }
+      },
+      group: {
+        render: true,
+        params: 1,
+        getTitle(path) {
+          return `Lightning Node Group: ${path[0]}`;
+        }
+      }
     }
   },
   mining: {
     title: "Mining",
-    fallbackImg: '/resources/previews/mining.png'
+    fallbackImg: '/resources/previews/mining.png',
+    routes: {
+      pool: {
+        render: true,
+        params: 1,
+        getTitle(path) {
+          return `Mining Pool: ${path[0]}`;
+        }
+      }
+    }
   }
 };
 
 const networks = {
   bitcoin: {
-    fallbackImg: '/resources/mempool-space-preview.png',
-    staticImg: '/resources/previews/dashboard.png',
+    fallbackImg: '/resources/previews/dashboard.png',
     routes: {
       ...routes // all routes supported
     }

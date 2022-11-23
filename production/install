@@ -400,6 +400,10 @@ FREEBSD_PKG+=(boost-libs autoconf automake gmake gcc libevent libtool pkgconf)
 FREEBSD_PKG+=(nginx rsync py39-certbot-nginx mariadb105-server keybase)
 FREEBSD_PKG+=(geoipupdate)
 
+FREEBSD_UNFURL_PKG=()
+FREEBSD_UNFURL_PKG+=(nvidia-driver-470 chromium xinit xterm twm ja-sourcehansans-otf)
+FREEBSD_UNFURL_PKG+=(zh-sourcehansans-sc-otf ko-aleefonts-ttf lohit tlwg-ttf)
+
 #############################
 ##### utility functions #####
 #############################
@@ -1005,7 +1009,6 @@ osSudo "${MEMPOOL_USER}" git clone --branch "${MEMPOOL_REPO_BRANCH}" "${MEMPOOL_
 osSudo "${MEMPOOL_USER}" ln -s mempool/production/mempool-build-all upgrade
 osSudo "${MEMPOOL_USER}" ln -s mempool/production/mempool-kill-all stop
 osSudo "${MEMPOOL_USER}" ln -s mempool/production/mempool-start-all start
-osSudo "${MEMPOOL_USER}" ln -s mempool/production/mempool-restart-all restart
 
 
 case $OS in
@@ -1321,9 +1324,9 @@ case $OS in
         osPackageInstall ${CLN_PKG}
 
         echo "[*] Installing Core Lightning mainnet Cronjob"
-        crontab_cln+='@reboot sleep 60 ; screen -dmS main lightningd --alias `hostname` --bitcoin-datadir /bitcoin\n'
-        crontab_cln+='@reboot sleep 90 ; screen -dmS tes lightningd --alias `hostname` --bitcoin-datadir /bitcoin --network testnet\n'
-        crontab_cln+='@reboot sleep 120 ; screen -dmS sig lightningd --alias `hostname` --bitcoin-datadir /bitcoin --network signet\n'
+        crontab_cln+='@reboot sleep 60 ; screen -dmS main lightningd --alias `hostname` --fee-base 0 --bitcoin-datadir /bitcoin\n'
+        crontab_cln+='@reboot sleep 90 ; screen -dmS tes lightningd --alias `hostname` --fee-base 0 --bitcoin-datadir /bitcoin --network testnet\n'
+        crontab_cln+='@reboot sleep 120 ; screen -dmS sig lightningd --alias `hostname` --fee-base 0 --bitcoin-datadir /bitcoin --network signet\n'
         echo "${crontab_cln}" | crontab -u "${CLN_USER}" -
     ;;
     Debian)
@@ -1431,7 +1434,42 @@ if [ "${UNFURL_INSTALL}" = ON ];then
     case $OS in
 
         FreeBSD)
-            echo "[*] FIXME: Unfurl must be installed manually on FreeBSD"
+
+            if pciconf -lv|grep -i nvidia >/dev/null 2>&1;then
+                echo "[*] GPU detected: Installing packages for Unfurl"
+                osPackageInstall ${FREEBSD_UNFURL_PKG[@]}
+
+                echo 'allowed_users = anybody' >> /usr/local/etc/X11/Xwrapper.config
+                echo 'kld_list="nvidia"' >> /etc/rc.conf
+                echo 'nvidia_xorg_enable="YES"' >> /etc/rc.conf
+
+                echo "[*] Installing color emoji"
+                osSudo "${ROOT_USER}" curl "https://github.com/samuelngs/apple-emoji-linux/releases/download/ios-15.4/AppleColorEmoji.ttf" -o /usr/local/share/fonts/TTF/AppleColorEmoji.ttf
+                cat >> /usr/local/etc/fonts/conf.d/01-emoji.conf <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+<match>
+<test name="family"><string>sans-serif</string></test>
+<edit name="family" mode="prepend" binding="strong">
+<string>Apple Color Emoji</string>
+</edit>
+</match>
+<match>
+<test name="family"><string>serif</string></test>
+<edit name="family" mode="prepend" binding="strong">
+<string>Apple Color Emoji</string>
+</edit>
+</match>
+<match>
+<test name="family"><string>Apple Color Emoji</string></test>
+<edit name="family" mode="prepend" binding="strong">
+<string>Apple Color Emoji</string>
+</edit>
+</match>
+</fontconfig>
+EOF
+            fi
         ;;
 
         Debian)

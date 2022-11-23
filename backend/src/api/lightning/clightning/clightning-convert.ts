@@ -7,18 +7,32 @@ import { Common } from '../../common';
  * Convert a clightning "listnode" entry to a lnd node entry
  */
 export function convertNode(clNode: any): ILightningApi.Node {
+  let custom_records: { [type: number]: string } | undefined = undefined;
+  if (clNode.option_will_fund) {
+    try {
+      custom_records = { '1': Buffer.from(clNode.option_will_fund.compact_lease || '', 'hex').toString('base64') };
+    } catch (e) {
+      logger.err(`Cannot decode option_will_fund compact_lease for ${clNode.nodeid}). Reason: ` + (e instanceof Error ? e.message : e));
+      custom_records = undefined;
+    }
+  }
   return {
     alias: clNode.alias ?? '',
     color: `#${clNode.color ?? ''}`,
     features: [], // TODO parse and return clNode.feature
     pub_key: clNode.nodeid,
     addresses: clNode.addresses?.map((addr) => {
+      let address = addr.address;
+      if (addr.type === 'ipv6') {
+        address = `[${address}]`;
+      }
       return {
         network: addr.type,
-        addr: `${addr.address}:${addr.port}`
+        addr: `${address}:${addr.port}`
       };
     }) ?? [],
     last_update: clNode?.last_timestamp ?? 0,
+    custom_records
   };
 }
 
@@ -66,6 +80,8 @@ export async function convertAndmergeBidirectionalChannels(clChannels: any[]): P
       logger.info(`Building partial channels from clightning output. Channels processed: ${channelProcessed + 1} of ${keys.length}`);
       loggerTimer = new Date().getTime() / 1000;
     }
+
+    channelProcessed++;
   }
 
   return consolidatedChannelList;
@@ -120,7 +136,7 @@ async function buildIncompleteChannel(clChannel: any): Promise<ILightningApi.Cha
  */
 function convertPolicy(clChannel: any): ILightningApi.RoutingPolicy {
   return {
-    time_lock_delta: 0, // TODO
+    time_lock_delta: clChannel.delay,
     min_htlc: clChannel.htlc_minimum_msat.slice(0, -4),
     max_htlc_msat: clChannel.htlc_maximum_msat.slice(0, -4),
     fee_base_msat: clChannel.base_fee_millisatoshi,

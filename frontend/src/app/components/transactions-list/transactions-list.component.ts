@@ -4,10 +4,10 @@ import { Observable, ReplaySubject, BehaviorSubject, merge, Subscription } from 
 import { Outspend, Transaction, Vin, Vout } from '../../interfaces/electrs.interface';
 import { ElectrsApiService } from '../../services/electrs-api.service';
 import { environment } from 'src/environments/environment';
-import { AssetsService } from 'src/app/services/assets.service';
+import { AssetsService } from '../../services/assets.service';
 import { filter, map, tap, switchMap } from 'rxjs/operators';
-import { BlockExtended } from 'src/app/interfaces/node-api.interface';
-import { ApiService } from 'src/app/services/api.service';
+import { BlockExtended } from '../../interfaces/node-api.interface';
+import { ApiService } from '../../services/api.service';
 
 @Component({
   selector: 'app-transactions-list',
@@ -18,12 +18,14 @@ import { ApiService } from 'src/app/services/api.service';
 export class TransactionsListComponent implements OnInit, OnChanges {
   network = '';
   nativeAssetId = this.stateService.network === 'liquidtestnet' ? environment.nativeTestAssetId : environment.nativeAssetId;
+  showMoreIncrement = 1000;
 
   @Input() transactions: Transaction[];
   @Input() showConfirmations = false;
   @Input() transactionPage = false;
   @Input() errorUnblinded = false;
   @Input() paginated = false;
+  @Input() inputIndex: number;
   @Input() outputIndex: number;
   @Input() address: string = '';
   @Input() rowLimit = 12;
@@ -37,6 +39,8 @@ export class TransactionsListComponent implements OnInit, OnChanges {
   showDetails$ = new BehaviorSubject<boolean>(false);
   assetsMinimal: any;
   transactionsLength: number = 0;
+  inputRowLimit: number = 12;
+  outputRowLimit: number = 12;
 
   constructor(
     public stateService: StateService,
@@ -97,50 +101,57 @@ export class TransactionsListComponent implements OnInit, OnChanges {
     ).subscribe(() => this.ref.markForCheck());
   }
 
-  ngOnChanges(): void {
-    if (!this.transactions || !this.transactions.length) {
-      return;
+  ngOnChanges(changes): void {
+    if (changes.inputIndex || changes.outputIndex || changes.rowLimit) {
+      this.inputRowLimit = Math.max(this.rowLimit, (this.inputIndex || 0) + 3);
+      this.outputRowLimit = Math.max(this.rowLimit, (this.outputIndex || 0) + 3);
+      if ((this.inputIndex || this.outputIndex) && !changes.transactions) {
+        setTimeout(() => {
+          const assetBoxElements = document.getElementsByClassName('assetBox');
+          if (assetBoxElements && assetBoxElements[0]) {
+            assetBoxElements[0].scrollIntoView({block: "center"});
+          }
+        }, 10);
+      }
     }
-
-    this.transactionsLength = this.transactions.length;
-    if (this.outputIndex) {
-      setTimeout(() => {
-        const assetBoxElements = document.getElementsByClassName('assetBox');
-        if (assetBoxElements && assetBoxElements[0]) {
-          assetBoxElements[0].scrollIntoView();
-        }
-      }, 10);
-    }
-
-    this.transactions.forEach((tx) => {
-      tx['@voutLimit'] = true;
-      tx['@vinLimit'] = true;
-      if (tx['addressValue'] !== undefined) {
+    if (changes.transactions || changes.address) {
+      if (!this.transactions || !this.transactions.length) {
         return;
       }
 
-      if (this.address) {
-        const addressIn = tx.vout
-          .filter((v: Vout) => v.scriptpubkey_address === this.address)
-          .map((v: Vout) => v.value || 0)
-          .reduce((a: number, b: number) => a + b, 0);
+      this.transactionsLength = this.transactions.length;
+      this.stateService.setTxCache(this.transactions);
 
-        const addressOut = tx.vin
-          .filter((v: Vin) => v.prevout && v.prevout.scriptpubkey_address === this.address)
-          .map((v: Vin) => v.prevout.value || 0)
-          .reduce((a: number, b: number) => a + b, 0);
+      this.transactions.forEach((tx) => {
+        tx['@voutLimit'] = true;
+        tx['@vinLimit'] = true;
+        if (tx['addressValue'] !== undefined) {
+          return;
+        }
 
-        tx['addressValue'] = addressIn - addressOut;
-      }
-    });
-    const txIds = this.transactions.filter((tx) => !tx._outspends).map((tx) => tx.txid);
-    if (txIds.length) {
-      this.refreshOutspends$.next(txIds);
-    }
-    if (this.stateService.env.LIGHTNING) {
-      const txIds = this.transactions.filter((tx) => !tx._channels).map((tx) => tx.txid);
+        if (this.address) {
+          const addressIn = tx.vout
+            .filter((v: Vout) => v.scriptpubkey_address === this.address)
+            .map((v: Vout) => v.value || 0)
+            .reduce((a: number, b: number) => a + b, 0);
+
+          const addressOut = tx.vin
+            .filter((v: Vin) => v.prevout && v.prevout.scriptpubkey_address === this.address)
+            .map((v: Vin) => v.prevout.value || 0)
+            .reduce((a: number, b: number) => a + b, 0);
+
+          tx['addressValue'] = addressIn - addressOut;
+        }
+      });
+      const txIds = this.transactions.filter((tx) => !tx._outspends).map((tx) => tx.txid);
       if (txIds.length) {
-        this.refreshChannels$.next(txIds);
+        this.refreshOutspends$.next(txIds);
+      }
+      if (this.stateService.env.LIGHTNING) {
+        const txIds = this.transactions.filter((tx) => !tx._channels).map((tx) => tx.txid);
+        if (txIds.length) {
+          this.refreshChannels$.next(txIds);
+        }
       }
     }
   }
@@ -198,14 +209,50 @@ export class TransactionsListComponent implements OnInit, OnChanges {
   }
 
   loadMoreInputs(tx: Transaction): void {
-    tx['@vinLimit'] = false;
+    if (!tx['@vinLoaded']) {
+      this.electrsApiService.getTransaction$(tx.txid)
+        .subscribe((newTx) => {
+          tx['@vinLoaded'] = true;
+          tx.vin = newTx.vin;
+          tx.fee = newTx.fee;
+          this.ref.markForCheck();
+        });
+    }
+  }
 
-    this.electrsApiService.getTransaction$(tx.txid)
-      .subscribe((newTx) => {
-        tx.vin = newTx.vin;
-        tx.fee = newTx.fee;
-        this.ref.markForCheck();
-      });
+  showMoreInputs(tx: Transaction): void {
+    this.loadMoreInputs(tx);
+    tx['@vinLimit'] = this.getVinLimit(tx, true);
+  }
+
+  showMoreOutputs(tx: Transaction): void {
+    tx['@voutLimit'] = this.getVoutLimit(tx, true);
+  }
+
+  getVinLimit(tx: Transaction, next = false): number {
+    let limit;
+    if ((tx['@vinLimit'] || 0) > this.inputRowLimit) {
+      limit = Math.min(tx['@vinLimit'] + (next ? this.showMoreIncrement : 0), tx.vin.length);
+    } else {
+      limit = Math.min((next ? this.showMoreIncrement : this.inputRowLimit), tx.vin.length);
+    }
+    if (tx.vin.length - limit <= 5) {
+      limit = tx.vin.length;
+    }
+    return limit;
+  }
+
+  getVoutLimit(tx: Transaction, next = false): number {
+    let limit;
+    if ((tx['@voutLimit'] || 0) > this.outputRowLimit) {
+      limit = Math.min(tx['@voutLimit'] + (next ? this.showMoreIncrement : 0), tx.vout.length);
+    } else {
+      limit = Math.min((next ? this.showMoreIncrement : this.outputRowLimit), tx.vout.length);
+    }
+    if (tx.vout.length - limit <= 5) {
+      limit = tx.vout.length;
+    }
+    return limit;
   }
 
   ngOnDestroy(): void {

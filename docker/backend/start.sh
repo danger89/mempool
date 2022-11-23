@@ -3,6 +3,7 @@
 # MEMPOOL
 __MEMPOOL_NETWORK__=${MEMPOOL_NETWORK:=mainnet}
 __MEMPOOL_BACKEND__=${MEMPOOL_BACKEND:=electrum}
+__MEMPOOL_ENABLED__=${MEMPOOL_ENABLED:=true}
 __MEMPOOL_HTTP_PORT__=${BACKEND_HTTP_PORT:=8999}
 __MEMPOOL_SPAWN_CLUSTER_PROCS__=${MEMPOOL_SPAWN_CLUSTER_PROCS:=0}
 __MEMPOOL_API_URL_PREFIX__=${MEMPOOL_API_URL_PREFIX:=/api/v1/}
@@ -105,12 +106,13 @@ __LND_MACAROON_PATH__=${LND_MACAROON_PATH:=""}
 __LND_REST_API_URL__=${LND_REST_API_URL:="https://localhost:8080"}
 
 # CLN
-__CLN_SOCKET__=${CLN_SOCKET:=""}
+__CLIGHTNING_SOCKET__=${CLIGHTNING_SOCKET:=""}
 
 mkdir -p "${__MEMPOOL_CACHE_DIR__}"
 
 sed -i "s/__MEMPOOL_NETWORK__/${__MEMPOOL_NETWORK__}/g" mempool-config.json
 sed -i "s/__MEMPOOL_BACKEND__/${__MEMPOOL_BACKEND__}/g" mempool-config.json
+sed -i "s/__MEMPOOL_ENABLED__/${__MEMPOOL_ENABLED__}/g" mempool-config.json
 sed -i "s/__MEMPOOL_HTTP_PORT__/${__MEMPOOL_HTTP_PORT__}/g" mempool-config.json
 sed -i "s/__MEMPOOL_SPAWN_CLUSTER_PROCS__/${__MEMPOOL_SPAWN_CLUSTER_PROCS__}/g" mempool-config.json
 sed -i "s!__MEMPOOL_API_URL_PREFIX__!${__MEMPOOL_API_URL_PREFIX__}!g" mempool-config.json
@@ -132,8 +134,8 @@ sed -i "s!__MEMPOOL_USER_AGENT__!${__MEMPOOL_USER_AGENT__}!g" mempool-config.jso
 sed -i "s/__MEMPOOL_STDOUT_LOG_MIN_PRIORITY__/${__MEMPOOL_STDOUT_LOG_MIN_PRIORITY__}/g" mempool-config.json
 sed -i "s/__MEMPOOL_INDEXING_BLOCKS_AMOUNT__/${__MEMPOOL_INDEXING_BLOCKS_AMOUNT__}/g" mempool-config.json
 sed -i "s/__MEMPOOL_AUTOMATIC_BLOCK_REINDEXING__/${__MEMPOOL_AUTOMATIC_BLOCK_REINDEXING__}/g" mempool-config.json
-sed -i "s!__MEMPOOL_POOLS_JSON_URL__!${__MEMPOOL_POOLS_JSON_URL__}/g" mempool-config.json
-sed -i "s!__MEMPOOL_POOLS_JSON_TREE_URL__!${__MEMPOOL_POOLS_JSON_TREE_URL__}/g" mempool-config.json
+sed -i "s!__MEMPOOL_POOLS_JSON_URL__!${__MEMPOOL_POOLS_JSON_URL__}!g" mempool-config.json
+sed -i "s!__MEMPOOL_POOLS_JSON_TREE_URL__!${__MEMPOOL_POOLS_JSON_TREE_URL__}!g" mempool-config.json
 
 sed -i "s/__CORE_RPC_HOST__/${__CORE_RPC_HOST__}/g" mempool-config.json
 sed -i "s/__CORE_RPC_PORT__/${__CORE_RPC_PORT__}/g" mempool-config.json
@@ -203,6 +205,6 @@ sed -i "s!__LND_MACAROON_PATH__!${__LND_MACAROON_PATH__}!g" mempool-config.json
 sed -i "s!__LND_REST_API_URL__!${__LND_REST_API_URL__}!g" mempool-config.json
 
 # CLN
-sed -i "s!__CLN_SOCKET__!${__CLN_SOCKET__}!g" mempool-config.json
+sed -i "s!__CLIGHTNING_SOCKET__!${__CLIGHTNING_SOCKET__}!g" mempool-config.json
 
-node /backend/dist/index.js
+node /backend/package/index.js

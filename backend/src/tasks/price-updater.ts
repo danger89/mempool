@@ -1,12 +1,11 @@
 import * as fs from 'fs';
-import { Common } from '../api/common';
+import path from "path";
 import config from '../config';
 import logger from '../logger';
 import PricesRepository from '../repositories/PricesRepository';
 import BitfinexApi from './price-feeds/bitfinex-api';
 import BitflyerApi from './price-feeds/bitflyer-api';
 import CoinbaseApi from './price-feeds/coinbase-api';
-import FtxApi from './price-feeds/ftx-api';
 import GeminiApi from './price-feeds/gemini-api';
 import KrakenApi from './price-feeds/kraken-api';
 
@@ -47,7 +46,6 @@ class PriceUpdater {
     this.latestPrices = this.getEmptyPricesObj();
 
     this.feeds.push(new BitflyerApi()); // Does not have historical endpoint
-    this.feeds.push(new FtxApi());
     this.feeds.push(new KrakenApi());
     this.feeds.push(new CoinbaseApi());
     this.feeds.push(new BitfinexApi());
@@ -159,7 +157,7 @@ class PriceUpdater {
     const existingPriceTimes = await PricesRepository.$getPricesTimes();
 
     // Insert MtGox weekly prices
-    const pricesJson: any[] = JSON.parse(fs.readFileSync('./src/tasks/price-feeds/mtgox-weekly.json').toString());
+    const pricesJson: any[] = JSON.parse(fs.readFileSync(path.join(__dirname, 'mtgox-weekly.json')).toString());
     const prices = this.getEmptyPricesObj();
     let insertedCount: number = 0;
     for (const price of pricesJson) {

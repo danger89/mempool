@@ -18,6 +18,7 @@ import difficultyAdjustment from './difficulty-adjustment';
 import feeApi from './fee-api';
 import BlocksAuditsRepository from '../repositories/BlocksAuditsRepository';
 import BlocksSummariesRepository from '../repositories/BlocksSummariesRepository';
+import Audit from './audit';
 
 class WebsocketHandler {
   private wss: WebSocket.Server | undefined;
@@ -243,13 +244,18 @@ class WebsocketHandler {
     });
   }
 
-  handleMempoolChange(newMempool: { [txid: string]: TransactionExtended },
-    newTransactions: TransactionExtended[], deletedTransactions: TransactionExtended[]) {
+  async handleMempoolChange(newMempool: { [txid: string]: TransactionExtended },
+    newTransactions: TransactionExtended[], deletedTransactions: TransactionExtended[]): Promise<void> {
     if (!this.wss) {
       throw new Error('WebSocket.Server is not set');
     }
 
-    mempoolBlocks.updateMempoolBlocks(newMempool);
+    if (config.MEMPOOL.ADVANCED_TRANSACTION_SELECTION) {
+      await mempoolBlocks.makeBlockTemplates(newMempool, 8, null, true);
+    }
+    else {
+      mempoolBlocks.updateMempoolBlocks(newMempool);
+    }
     const mBlocks = mempoolBlocks.getMempoolBlocks();
     const mBlockDeltas = mempoolBlocks.getMempoolBlockDeltas();
     const mempoolInfo = memPool.getMempoolInfo();
@@ -404,75 +410,70 @@ class WebsocketHandler {
       }
     });
   }
-
-  handleNewBlock(block: BlockExtended, txIds: string[], transactions: TransactionExtended[]) {
+ 
+  async handleNewBlock(block: BlockExtended, txIds: string[], transactions: TransactionExtended[]): Promise<void> {
     if (!this.wss) {
       throw new Error('WebSocket.Server is not set');
     }
 
-    let mBlocks: undefined | MempoolBlock[];
-    let mBlockDeltas: undefined | MempoolBlockDelta[];
-    let matchRate = 0;
     const _memPool = memPool.getMempool();
-    const _mempoolBlocks = mempoolBlocks.getMempoolBlocksWithTransactions();
+    let matchRate;
 
-    if (_mempoolBlocks[0]) {
-      const matches: string[] = [];
-      const added: string[] = [];
-      const missing: string[] = [];
-
-      for (const txId of txIds) {
-        if (_mempoolBlocks[0].transactionIds.indexOf(txId) > -1) {
-          matches.push(txId);
-        } else {
-          added.push(txId);
-        }
-        delete _memPool[txId];
-      }
-
-      for (const txId of _mempoolBlocks[0].transactionIds) {
-        if (matches.includes(txId) || added.includes(txId)) {
-          continue;
-        }
-        missing.push(txId);
-      }
-
-      matchRate = Math.round((Math.max(0, matches.length - missing.length - added.length) / txIds.length * 100) * 100) / 100;
+    if (config.MEMPOOL.ADVANCED_TRANSACTION_SELECTION) {
+      await mempoolBlocks.makeBlockTemplates(_memPool, 2);
+    } else {
       mempoolBlocks.updateMempoolBlocks(_memPool);
-      mBlocks = mempoolBlocks.getMempoolBlocks();
-      mBlockDeltas = mempoolBlocks.getMempoolBlockDeltas();
+    }
 
-      if (Common.indexingEnabled()) {
-        const stripped = _mempoolBlocks[0].transactions.map((tx) => {
-          return {
-            txid: tx.txid,
-            vsize: tx.vsize,
-            fee: tx.fee ? Math.round(tx.fee) : 0,
-            value: tx.value,
-          };
-        });  
-        BlocksSummariesRepository.$saveSummary({
-          height: block.height,
-          template: {
-            id: block.id,
-            transactions: stripped
-          }
-        });
+    if (Common.indexingEnabled() && memPool.isInSync()) {
+      const projectedBlocks = mempoolBlocks.getMempoolBlocksWithTransactions();
 
-        BlocksAuditsRepository.$saveAudit({
-          time: block.timestamp,
-          height: block.height,
-          hash: block.id,
-          addedTxs: added,
-          missingTxs: missing,
-          matchRate: matchRate,
-        });
+      const { censored, added, score } = Audit.auditBlock(transactions, projectedBlocks, _memPool);
+      matchRate = Math.round(score * 100 * 100) / 100;
+
+      const stripped = projectedBlocks[0]?.transactions ? projectedBlocks[0].transactions.map((tx) => {
+        return {
+          txid: tx.txid,
+          vsize: tx.vsize,
+          fee: tx.fee ? Math.round(tx.fee) : 0,
+          value: tx.value,
+        };
+      }) : [];
+
+      BlocksSummariesRepository.$saveSummary({
+        height: block.height,
+        template: {
+          id: block.id,
+          transactions: stripped
+        }
+      });
+
+      BlocksAuditsRepository.$saveAudit({
+        time: block.timestamp,
+        height: block.height,
+        hash: block.id,
+        addedTxs: added,
+        missingTxs: censored,
+        matchRate: matchRate,
+      });
+
+      if (block.extras) {
+        block.extras.matchRate = matchRate;
       }
     }
 
-    if (block.extras) {
-      block.extras.matchRate = matchRate;
+    // Update mempool to remove transactions included in the new block
+    for (const txId of txIds) {
+      delete _memPool[txId];
     }
+
+    if (config.MEMPOOL.ADVANCED_TRANSACTION_SELECTION) {
+      await mempoolBlocks.makeBlockTemplates(_memPool, 2);
+    } else {
+      mempoolBlocks.updateMempoolBlocks(_memPool);
+    }
+    const mBlocks = mempoolBlocks.getMempoolBlocks();
+    const mBlockDeltas = mempoolBlocks.getMempoolBlockDeltas();
 
     const da = difficultyAdjustment.getDifficultyAdjustment();
     const fees = feeApi.getRecommendedFee();

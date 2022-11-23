@@ -89,6 +89,7 @@ Below we list all settings from `mempool-config.json` and the corresponding over
   "MEMPOOL": {
     "NETWORK": "mainnet",
     "BACKEND": "electrum",
+    "ENABLED": true,
     "HTTP_PORT": 8999,
     "SPAWN_CLUSTER_PROCS": 0,
     "API_URL_PREFIX": "/api/v1/",
@@ -403,7 +404,7 @@ Corresponding `docker-compose.yml` overrides:
 
 `mempool-config.json`:
 ```
-  "CLN": {
+  "CLIGHTNING": {
     "SOCKET": ""
   }
 ```
@@ -412,6 +413,6 @@ Corresponding `docker-compose.yml` overrides:
 ```
   api:
     environment:
-      CLN_SOCKET: ""
+      CLIGHTNING_SOCKET: ""
       ...
 ```

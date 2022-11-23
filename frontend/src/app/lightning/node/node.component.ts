@@ -1,11 +1,18 @@
 import { ChangeDetectionStrategy, Component, OnInit } from '@angular/core';
 import { ActivatedRoute, ParamMap } from '@angular/router';
 import { Observable } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
-import { SeoService } from 'src/app/services/seo.service';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
+import { SeoService } from '../../services/seo.service';
+import { ApiService } from '../../services/api.service';
 import { LightningApiService } from '../lightning-api.service';
-import { isMobile } from '../../shared/common.utils';
-import { GeolocationData } from 'src/app/shared/components/geolocation/geolocation.component';
+import { GeolocationData } from '../../shared/components/geolocation/geolocation.component';
+import { ILiquidityAd, parseLiquidityAdHex } from './liquidity-ad';
+import { haversineDistance, kmToMiles } from 'src/app/shared/common.utils';
+
+interface CustomRecord {
+  type: string;
+  payload: string;
+}
 
 @Component({
   selector: 'app-node',
@@ -23,27 +30,34 @@ export class NodeComponent implements OnInit {
   error: Error;
   publicKey: string;
   channelListLoading = false;
-  publicKeySize = 99;
+  clearnetSocketCount = 0;
+  torSocketCount = 0;
+  hasDetails = false;
+  showDetails = false;
+  liquidityAd: ILiquidityAd;
+  tlvRecords: CustomRecord[];
+  avgChannelDistance$: Observable<number | null>;
+
+  kmToMiles = kmToMiles;
 
   constructor(
+    private apiService: ApiService,
     private lightningApiService: LightningApiService,
     private activatedRoute: ActivatedRoute,
     private seoService: SeoService,
-  ) {
-    if (isMobile()) {
-      this.publicKeySize = 12;
-    }
-  }
+  ) { }
 
   ngOnInit(): void {
     this.node$ = this.activatedRoute.paramMap
       .pipe(
         switchMap((params: ParamMap) => {
           this.publicKey = params.get('public_key');
+          this.tlvRecords = [];
+          this.liquidityAd = null;
           return this.lightningApiService.getNode$(params.get('public_key'));
         }),
         map((node) => {
-          this.seoService.setTitle(`Node: ${node.alias}`);
+          this.seoService.setTitle($localize`Node: ${node.alias}`);
 
           const socketsObject = [];
           for (const socket of node.sockets.split(',')) {
@@ -53,10 +67,13 @@ export class NodeComponent implements OnInit {
             let label = '';
             if (socket.match(/(?:[0-9]{1,3}\.){3}[0-9]{1,3}/)) {
               label = 'IPv4';
+              this.clearnetSocketCount++;
             } else if (socket.indexOf('[') > -1) {
               label = 'IPv6';
+              this.clearnetSocketCount++;
             } else if (socket.indexOf('onion') > -1) {
               label = 'Tor';
+              this.torSocketCount++;
             }
             socketsObject.push({
               label: label,
@@ -80,6 +97,26 @@ export class NodeComponent implements OnInit {
 
           return node;
         }),
+        tap((node) => {
+          this.hasDetails = Object.keys(node.custom_records).length > 0;
+          for (const [type, payload] of Object.entries(node.custom_records)) {
+            if (typeof payload !== 'string') {
+              break;
+            }
+
+            let parsed = false;
+            if (type === '1') {
+              const ad = parseLiquidityAdHex(payload);
+              if (ad) {
+                parsed = true;
+                this.liquidityAd = ad;
+              }
+            }
+            if (!parsed) {
+              this.tlvRecords.push({ type, payload });
+            }
+          }
+        }),
         catchError(err => {
           this.error = err;
           return [{
@@ -88,6 +125,30 @@ export class NodeComponent implements OnInit {
           }];
         })
       );
+
+    this.avgChannelDistance$ = this.activatedRoute.paramMap
+    .pipe(
+      switchMap((params: ParamMap) => {
+        return this.apiService.getChannelsGeo$(params.get('public_key'), 'nodepage');
+      }),
+      map((channelsGeo) => {
+        if (channelsGeo?.length) {
+          const totalDistance = channelsGeo.reduce((sum, chan) => {
+            return sum + haversineDistance(chan[3], chan[2], chan[7], chan[6]);
+          }, 0);
+          return totalDistance / channelsGeo.length;
+        } else {
+          return null;
+        }
+      }),
+      catchError(() => {
+        return null;
+      })
+    ) as Observable<number | null>;
+  }
+
+  toggleShowDetails(): void {
+    this.showDetails = !this.showDetails;
   }
 
   changeSocket(index: number) {

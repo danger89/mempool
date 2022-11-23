@@ -2,10 +2,16 @@ import logger from '../logger';
 import { MempoolBlock, TransactionExtended, TransactionStripped, MempoolBlockWithTransactions, MempoolBlockDelta } from '../mempool.interfaces';
 import { Common } from './common';
 import config from '../config';
+import { StaticPool } from 'node-worker-threads-pool';
+import path from 'path';
 
 class MempoolBlocks {
   private mempoolBlocks: MempoolBlockWithTransactions[] = [];
   private mempoolBlockDeltas: MempoolBlockDelta[] = [];
+  private makeTemplatesPool = new StaticPool({
+    size: 1,
+    task: path.resolve(__dirname, './tx-selection-worker.js'),
+  });
 
   constructor() {}
 
@@ -71,15 +77,15 @@ class MempoolBlocks {
     const time = end - start;
     logger.debug('Mempool blocks calculated in ' + time / 1000 + ' seconds');
 
-    const { blocks, deltas } = this.calculateMempoolBlocks(memPoolArray, this.mempoolBlocks);
+    const blocks = this.calculateMempoolBlocks(memPoolArray, this.mempoolBlocks);
+    const deltas = this.calculateMempoolDeltas(this.mempoolBlocks, blocks);
+
     this.mempoolBlocks = blocks;
     this.mempoolBlockDeltas = deltas;
   }
 
-  private calculateMempoolBlocks(transactionsSorted: TransactionExtended[], prevBlocks: MempoolBlockWithTransactions[]):
-    { blocks: MempoolBlockWithTransactions[], deltas: MempoolBlockDelta[] } {
+  private calculateMempoolBlocks(transactionsSorted: TransactionExtended[], prevBlocks: MempoolBlockWithTransactions[]): MempoolBlockWithTransactions[] {
     const mempoolBlocks: MempoolBlockWithTransactions[] = [];
-    const mempoolBlockDeltas: MempoolBlockDelta[] = [];
     let blockWeight = 0;
     let blockSize = 0;
     let transactions: TransactionExtended[] = [];
@@ -99,7 +105,12 @@ class MempoolBlocks {
     if (transactions.length) {
       mempoolBlocks.push(this.dataToMempoolBlocks(transactions, blockSize, blockWeight, mempoolBlocks.length));
     }
-    // Calculate change from previous block states
+
+    return mempoolBlocks;
+  }
+
+  private calculateMempoolDeltas(prevBlocks: MempoolBlockWithTransactions[], mempoolBlocks: MempoolBlockWithTransactions[]): MempoolBlockDelta[] {
+    const mempoolBlockDeltas: MempoolBlockDelta[] = [];
     for (let i = 0; i < Math.max(mempoolBlocks.length, prevBlocks.length); i++) {
       let added: TransactionStripped[] = [];
       let removed: string[] = [];
@@ -132,10 +143,25 @@ class MempoolBlocks {
         removed
       });
     }
-    return {
-      blocks: mempoolBlocks,
-      deltas: mempoolBlockDeltas
-    };
+    return mempoolBlockDeltas;
+  }
+
+  public async makeBlockTemplates(newMempool: { [txid: string]: TransactionExtended }, blockLimit: number, weightLimit: number | null = null, condenseRest = false): Promise<void> {
+    const { mempool, blocks } = await this.makeTemplatesPool.exec({ mempool: newMempool, blockLimit, weightLimit, condenseRest });
+    const deltas = this.calculateMempoolDeltas(this.mempoolBlocks, blocks);
+
+    // copy CPFP info across to main thread's mempool
+    Object.keys(newMempool).forEach((txid) => {
+      if (newMempool[txid] && mempool[txid]) {
+        newMempool[txid].effectiveFeePerVsize = mempool[txid].effectiveFeePerVsize;
+        newMempool[txid].ancestors = mempool[txid].ancestors;
+        newMempool[txid].bestDescendant = mempool[txid].bestDescendant;
+        newMempool[txid].cpfpChecked = mempool[txid].cpfpChecked;
+      }
+    });
+
+    this.mempoolBlocks = blocks;
+    this.mempoolBlockDeltas = deltas;
   }
 
   private dataToMempoolBlocks(transactions: TransactionExtended[],

@@ -141,7 +141,7 @@ export interface TransactionStripped {
   fee: number;
   vsize: number;
   value: number;
-  status?: 'found' | 'missing' | 'added';
+  status?: 'found' | 'missing' | 'added' | 'censored' | 'selected';
 }
 
 export interface RewardStats {
@@ -150,6 +150,11 @@ export interface RewardStats {
   totalReward: number;
   totalFee: number;
   totalTx: number;
+}
+
+export interface AuditScore {
+  hash: string;
+  matchRate?: number;
 }
 
 export interface ITopNodesPerChannels {
@@ -161,6 +166,9 @@ export interface ITopNodesPerChannels {
   updatedAt?: number,
   city?: any,
   country?: any,
+  subdivision?: any,
+  iso_code?: string,
+  geolocation?: any;
 }
 
 export interface ITopNodesPerCapacity {
@@ -172,6 +180,9 @@ export interface ITopNodesPerCapacity {
   updatedAt?: number,
   city?: any,
   country?: any,
+  subdivision?: any,
+  iso_code?: string,
+  geolocation?: any;
 }
 
 export interface INodesRanking {
@@ -188,6 +199,9 @@ export interface IOldestNodes {
   updatedAt?: number,
   city?: any,
   country?: any,
+  subdivision?: any,
+  iso_code?: string,
+  geolocation?: any;
 }
 
 export interface IChannel {

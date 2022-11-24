@@ -23,7 +23,7 @@ class NetworkSyncService {
   constructor() {}
 
   public async $startService(): Promise<void> {
-    logger.info('Starting lightning network sync service');
+    logger.info(`Starting lightning network sync service`, logger.tags.ln);
 
     this.loggerTimer = new Date().getTime() / 1000;
 
@@ -32,11 +32,11 @@ class NetworkSyncService {
 
   private async $runTasks(): Promise<void> {
     try {
-      logger.info(`Updating nodes and channels`);
+      logger.debug(`Updating nodes and channels`, logger.tags.ln);
 
       const networkGraph = await lightningApi.$getNetworkGraph();
       if (networkGraph.nodes.length === 0 || networkGraph.edges.length === 0) {
-        logger.info(`LN Network graph is empty, retrying in 10 seconds`);
+        logger.info(`LN Network graph is empty, retrying in 10 seconds`, logger.tags.ln);
         setTimeout(() => { this.$runTasks(); }, 10000);
         return;
       }
@@ -54,7 +54,7 @@ class NetworkSyncService {
       }
 
     } catch (e) {
-      logger.err('$runTasks() error: ' + (e instanceof Error ? e.message : e));
+      logger.err(`$runTasks() error: ${e instanceof Error ? e.message : e}`, logger.tags.ln);
     }
 
     setTimeout(() => { this.$runTasks(); }, 1000 * config.LIGHTNING.GRAPH_REFRESH_INTERVAL);
@@ -78,8 +78,8 @@ class NetworkSyncService {
       ++progress;
 
       const elapsedSeconds = Math.round((new Date().getTime() / 1000) - this.loggerTimer);
-      if (elapsedSeconds > 10) {
-        logger.info(`Updating node ${progress}/${nodes.length}`);
+      if (elapsedSeconds > config.LIGHTNING.LOGGER_UPDATE_INTERVAL) {
+        logger.debug(`Updating node ${progress}/${nodes.length}`, logger.tags.ln);
         this.loggerTimer = new Date().getTime() / 1000;
       }
 
@@ -105,7 +105,7 @@ class NetworkSyncService {
         deletedRecords += await NodeRecordsRepository.$deleteUnusedRecords(node.pub_key, customRecordTypes);
       }
     }
-    logger.info(`${progress} nodes updated. ${deletedSockets} sockets deleted. ${deletedRecords} custom records deleted.`);
+    logger.debug(`${progress} nodes updated. ${deletedSockets} sockets deleted. ${deletedRecords} custom records deleted.`);
 
     // If a channel if not present in the graph, mark it as inactive
     await nodesApi.$setNodesInactive(graphNodesPubkeys);
@@ -137,18 +137,18 @@ class NetworkSyncService {
         ++progress;
 
         const elapsedSeconds = Math.round((new Date().getTime() / 1000) - this.loggerTimer);
-        if (elapsedSeconds > 10) {
-          logger.info(`Updating channel ${progress}/${channels.length}`);
+        if (elapsedSeconds > config.LIGHTNING.LOGGER_UPDATE_INTERVAL) {
+          logger.debug(`Updating channel ${progress}/${channels.length}`, logger.tags.ln);
           this.loggerTimer = new Date().getTime() / 1000;
         }
       }
 
-      logger.info(`${progress} channels updated`);
+      logger.debug(`${progress} channels updated`, logger.tags.ln);
 
       // If a channel if not present in the graph, mark it as inactive
       await channelsApi.$setChannelsInactive(graphChannelsIds);
     } catch (e) {
-      logger.err(`Cannot update channel list. Reason: ${(e instanceof Error ? e.message : e)}`);
+      logger.err(` Cannot update channel list. Reason: ${(e instanceof Error ? e.message : e)}`, logger.tags.ln);
     }
   }
 
@@ -183,26 +183,28 @@ class NetworkSyncService {
         if (lowest < node.first_seen) {
           const query = `UPDATE nodes SET first_seen = FROM_UNIXTIME(?) WHERE public_key = ?`;
           const params = [lowest, node.public_key];
+          ++updated;
           await DB.query(query, params);
         }
         ++progress;
         const elapsedSeconds = Math.round((new Date().getTime() / 1000) - this.loggerTimer);
-        if (elapsedSeconds > 10) {
-          logger.info(`Updating node first seen date ${progress}/${nodes.length}`);
+        if (elapsedSeconds > config.LIGHTNING.LOGGER_UPDATE_INTERVAL) {
+          logger.debug(`Updating node first seen date ${progress}/${nodes.length}`, logger.tags.ln);
           this.loggerTimer = new Date().getTime() / 1000;
-          ++updated;
         }
       }
-      logger.info(`Updated ${updated} node first seen dates`);
+      if (updated > 0) {
+        logger.debug(`Updated ${updated} node first seen dates`, logger.tags.ln);
+      }
     } catch (e) {
-      logger.err('$updateNodeFirstSeen() error: ' + (e instanceof Error ? e.message : e));
+      logger.err(`$updateNodeFirstSeen() error: ${e instanceof Error ? e.message : e}`, logger.tags.ln);
     }
   }
 
   private async $lookUpCreationDateFromChain(): Promise<void> {
     let progress = 0;
 
-    logger.info(`Running channel creation date lookup`);
+    logger.debug(`Running channel creation date lookup`, logger.tags.ln);
     try {
       const channels = await channelsApi.$getChannelsWithoutCreatedDate();
       for (const channel of channels) {
@@ -213,14 +215,17 @@ class NetworkSyncService {
         );
         ++progress;
         const elapsedSeconds = Math.round((new Date().getTime() / 1000) - this.loggerTimer);
-        if (elapsedSeconds > 10) {
-          logger.info(`Updating channel creation date ${progress}/${channels.length}`);
+        if (elapsedSeconds > config.LIGHTNING.LOGGER_UPDATE_INTERVAL) {
+          logger.debug(`Updating channel creation date ${progress}/${channels.length}`, logger.tags.ln);
           this.loggerTimer = new Date().getTime() / 1000;
         }
       }
-      logger.info(`Updated ${channels.length} channels' creation date`);
+
+      if (channels.length > 0) {
+        logger.debug(`Updated ${channels.length} channels' creation date`, logger.tags.ln);
+      }      
     } catch (e) {
-      logger.err('$lookUpCreationDateFromChain() error: ' + (e instanceof Error ? e.message : e));
+      logger.err(`$lookUpCreationDateFromChain() error: ${e instanceof Error ? e.message : e}`, logger.tags.ln);
     }
   }
 
@@ -229,7 +234,7 @@ class NetworkSyncService {
    * mark that channel as inactive
    */
   private async $deactivateChannelsWithoutActiveNodes(): Promise<void> {
-    logger.info(`Find channels which nodes are offline`);
+    logger.debug(`Find channels which nodes are offline`, logger.tags.ln);
 
     try {
       const result = await DB.query<ResultSetHeader>(`
@@ -252,12 +257,10 @@ class NetworkSyncService {
         `);
 
       if (result[0].changedRows ?? 0 > 0) {
-        logger.info(`Marked ${result[0].changedRows} channels as inactive because they are not linked to any active node`);
-      } else {
-        logger.debug(`Marked ${result[0].changedRows} channels as inactive because they are not linked to any active node`);
+        logger.debug(`Marked ${result[0].changedRows} channels as inactive because they are not linked to any active node`, logger.tags.ln);
       }
     } catch (e) {
-      logger.err('$deactivateChannelsWithoutActiveNodes() error: ' + (e instanceof Error ? e.message : e));
+      logger.err(`$deactivateChannelsWithoutActiveNodes() error: ${e instanceof Error ? e.message : e}`, logger.tags.ln);
     }
   }
 
@@ -276,13 +279,13 @@ class NetworkSyncService {
       } else {
         log += ` for the first time`;
       }
-      logger.info(log);
+      logger.info(`${log}`, logger.tags.ln);
 
       const channels = await channelsApi.$getChannelsByStatus([0, 1]);
       for (const channel of channels) {
         const spendingTx = await bitcoinApi.$getOutspend(channel.transaction_id, channel.transaction_vout);
         if (spendingTx.spent === true && spendingTx.status?.confirmed === true) {
-          logger.debug('Marking channel: ' + channel.id + ' as closed.');
+          logger.debug(`Marking channel: ${channel.id} as closed.`, logger.tags.ln);
           await DB.query(`UPDATE channels SET status = 2, closing_date = FROM_UNIXTIME(?) WHERE id = ?`,
             [spendingTx.status.block_time, channel.id]);
           if (spendingTx.txid && !channel.closing_transaction_id) {
@@ -292,17 +295,185 @@ class NetworkSyncService {
 
         ++progress;
         const elapsedSeconds = Math.round((new Date().getTime() / 1000) - this.loggerTimer);
-        if (elapsedSeconds > 10) {
-          logger.info(`Checking if channel has been closed ${progress}/${channels.length}`);
+        if (elapsedSeconds > config.LIGHTNING.LOGGER_UPDATE_INTERVAL) {
+          logger.info(`Checking if channel has been closed ${progress}/${channels.length}`, logger.tags.ln);
           this.loggerTimer = new Date().getTime() / 1000;
         }
       }
 
       this.closedChannelsScanBlock = blocks.getCurrentBlockHeight();
-      logger.info(`Closed channels scan completed at block ${this.closedChannelsScanBlock}`);
+      logger.debug(`Closed channels scan completed at block ${this.closedChannelsScanBlock}`, logger.tags.ln);
     } catch (e) {
-      logger.err('$scanForClosedChannels() error: ' + (e instanceof Error ? e.message : e));
+      logger.err(`$scanForClosedChannels() error: ${e instanceof Error ? e.message : e}`, logger.tags.ln);
     }
+  }
+
+  /*
+    1. Mutually closed
+    2. Forced closed
+    3. Forced closed with penalty
+
+    ┌────────────────────────────────────┐       ┌────────────────────────────┐
+    │ outputs contain revocation script? ├──yes──► force close w/ penalty = 3 │
+    └──────────────┬─────────────────────┘       └────────────────────────────┘
+                   no
+    ┌──────────────▼──────────────────────────┐
+    │ outputs contain other lightning script? ├──┐
+    └──────────────┬──────────────────────────┘  │
+                   no                           yes
+    ┌──────────────▼─────────────┐               │
+    │ sequence starts with 0x80  │      ┌────────▼────────┐
+    │           and              ├──────► force close = 2 │
+    │ locktime starts with 0x20? │      └─────────────────┘
+    └──────────────┬─────────────┘
+                   no
+         ┌─────────▼────────┐
+         │ mutual close = 1 │
+         └──────────────────┘
+  */
+
+  private async $runClosedChannelsForensics(skipUnresolved: boolean = false): Promise<void> {
+    if (!config.ESPLORA.REST_API_URL) {
+      return;
+    }
+
+    let progress = 0;
+
+    try {
+      logger.debug(`Started running closed channel forensics...`, logger.tags.ln);
+      let channels;
+      const closedChannels = await channelsApi.$getClosedChannelsWithoutReason();
+      if (skipUnresolved) {
+        channels = closedChannels;
+      } else {
+        const unresolvedChannels = await channelsApi.$getUnresolvedClosedChannels();
+        channels = [...closedChannels, ...unresolvedChannels];
+      }
+
+      for (const channel of channels) {
+        let reason = 0;
+        let resolvedForceClose = false;
+        // Only Esplora backend can retrieve spent transaction outputs
+        try {
+          let outspends: IEsploraApi.Outspend[] | undefined;
+          try {
+            outspends = await bitcoinApi.$getOutspends(channel.closing_transaction_id);
+          } catch (e) {
+            logger.err(`Failed to call ${config.ESPLORA.REST_API_URL + '/tx/' + channel.closing_transaction_id + '/outspends'}. Reason ${e instanceof Error ? e.message : e}`);
+            continue;
+          }
+          const lightningScriptReasons: number[] = [];
+          for (const outspend of outspends) {
+            if (outspend.spent && outspend.txid) {
+              let spendingTx: IEsploraApi.Transaction | undefined;
+              try {
+                spendingTx = await bitcoinApi.$getRawTransaction(outspend.txid);
+              } catch (e) {
+                logger.err(`Failed to call ${config.ESPLORA.REST_API_URL + '/tx/' + outspend.txid}. Reason ${e instanceof Error ? e.message : e}`);
+                continue;
+              }
+              const lightningScript = this.findLightningScript(spendingTx.vin[outspend.vin || 0]);
+              lightningScriptReasons.push(lightningScript);
+            }
+          }
+          const filteredReasons = lightningScriptReasons.filter((r) => r !== 1);
+          if (filteredReasons.length) {
+            if (filteredReasons.some((r) => r === 2 || r === 4)) {
+              reason = 3;
+            } else {
+              reason = 2;
+              resolvedForceClose = true;
+            }
+          } else {
+            /*
+              We can detect a commitment transaction (force close) by reading Sequence and Locktime
+              https://github.com/lightning/bolts/blob/master/03-transactions.md#commitment-transaction
+            */
+            let closingTx: IEsploraApi.Transaction | undefined;
+            try {
+              closingTx = await bitcoinApi.$getRawTransaction(channel.closing_transaction_id);
+            } catch (e) {
+              logger.err(`Failed to call ${config.ESPLORA.REST_API_URL + '/tx/' + channel.closing_transaction_id}. Reason ${e instanceof Error ? e.message : e}`);
+              continue;
+            }
+            const sequenceHex: string = closingTx.vin[0].sequence.toString(16);
+            const locktimeHex: string = closingTx.locktime.toString(16);
+            if (sequenceHex.substring(0, 2) === '80' && locktimeHex.substring(0, 2) === '20') {
+              reason = 2; // Here we can't be sure if it's a penalty or not
+            } else {
+              reason = 1;
+            }
+          }
+          if (reason) {
+            logger.debug(`Setting closing reason ${reason} for channel: ${channel.id}.`, logger.tags.ln);
+            await DB.query(`UPDATE channels SET closing_reason = ? WHERE id = ?`, [reason, channel.id]);
+            if (reason === 2 && resolvedForceClose) {
+              await DB.query(`UPDATE channels SET closing_resolved = ? WHERE id = ?`, [true, channel.id]);
+            }
+          }
+        } catch (e) {
+          logger.err(`$runClosedChannelsForensics() failed for channel ${channel.short_id}. Reason: ${e instanceof Error ? e.message : e}`, logger.tags.ln);
+        }
+
+        ++progress;
+        const elapsedSeconds = Math.round((new Date().getTime() / 1000) - this.loggerTimer);
+        if (elapsedSeconds > config.LIGHTNING.LOGGER_UPDATE_INTERVAL) {
+          logger.debug(`Updating channel closed channel forensics ${progress}/${channels.length}`, logger.tags.ln);
+          this.loggerTimer = new Date().getTime() / 1000;
+        }
+      }
+      logger.debug(`Closed channels forensics scan complete.`);
+    } catch (e) {
+      logger.err(`$runClosedChannelsForensics() error: ${e instanceof Error ? e.message : e}`, logger.tags.ln);
+    }
+  }
+
+  private findLightningScript(vin: IEsploraApi.Vin): number {
+    const topElement = vin.witness[vin.witness.length - 2];
+      if (/^OP_IF OP_PUSHBYTES_33 \w{66} OP_ELSE OP_PUSH(NUM_\d+|BYTES_(1 \w{2}|2 \w{4})) OP_CSV OP_DROP OP_PUSHBYTES_33 \w{66} OP_ENDIF OP_CHECKSIG$/.test(vin.inner_witnessscript_asm)) {
+        // https://github.com/lightning/bolts/blob/master/03-transactions.md#commitment-transaction-outputs
+        if (topElement === '01') {
+          // top element is '01' to get in the revocation path
+          // 'Revoked Lightning Force Close';
+          // Penalty force closed
+          return 2;
+        } else {
+          // top element is '', this is a delayed to_local output
+          // 'Lightning Force Close';
+          return 3;
+        }
+      } else if (
+        /^OP_DUP OP_HASH160 OP_PUSHBYTES_20 \w{40} OP_EQUAL OP_IF OP_CHECKSIG OP_ELSE OP_PUSHBYTES_33 \w{66} OP_SWAP OP_SIZE OP_PUSHBYTES_1 20 OP_EQUAL OP_NOTIF OP_DROP OP_PUSHNUM_2 OP_SWAP OP_PUSHBYTES_33 \w{66} OP_PUSHNUM_2 OP_CHECKMULTISIG OP_ELSE OP_HASH160 OP_PUSHBYTES_20 \w{40} OP_EQUALVERIFY OP_CHECKSIG OP_ENDIF (OP_PUSHNUM_1 OP_CSV OP_DROP |)OP_ENDIF$/.test(vin.inner_witnessscript_asm) ||
+        /^OP_DUP OP_HASH160 OP_PUSHBYTES_20 \w{40} OP_EQUAL OP_IF OP_CHECKSIG OP_ELSE OP_PUSHBYTES_33 \w{66} OP_SWAP OP_SIZE OP_PUSHBYTES_1 20 OP_EQUAL OP_IF OP_HASH160 OP_PUSHBYTES_20 \w{40} OP_EQUALVERIFY OP_PUSHNUM_2 OP_SWAP OP_PUSHBYTES_33 \w{66} OP_PUSHNUM_2 OP_CHECKMULTISIG OP_ELSE OP_DROP OP_PUSHBYTES_3 \w{6} OP_CLTV OP_DROP OP_CHECKSIG OP_ENDIF (OP_PUSHNUM_1 OP_CSV OP_DROP |)OP_ENDIF$/.test(vin.inner_witnessscript_asm)
+      ) {
+        // https://github.com/lightning/bolts/blob/master/03-transactions.md#offered-htlc-outputs
+        // https://github.com/lightning/bolts/blob/master/03-transactions.md#received-htlc-outputs
+        if (topElement.length === 66) {
+          // top element is a public key
+          // 'Revoked Lightning HTLC'; Penalty force closed
+          return 4;
+        } else if (topElement) {
+          // top element is a preimage
+          // 'Lightning HTLC';
+          return 5;
+        } else {
+          // top element is '' to get in the expiry of the script
+          // 'Expired Lightning HTLC';
+          return 6;
+        }
+      } else if (/^OP_PUSHBYTES_33 \w{66} OP_CHECKSIG OP_IFDUP OP_NOTIF OP_PUSHNUM_16 OP_CSV OP_ENDIF$/.test(vin.inner_witnessscript_asm)) {
+        // https://github.com/lightning/bolts/blob/master/03-transactions.md#to_local_anchor-and-to_remote_anchor-output-option_anchors
+        if (topElement) {
+          // top element is a signature
+          // 'Lightning Anchor';
+          return 7;
+        } else {
+          // top element is '', it has been swept after 16 blocks
+          // 'Swept Lightning Anchor';
+          return 8;
+        }
+      }
+      return 1;
   }
 }
 

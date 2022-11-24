@@ -5,7 +5,7 @@ import { Common } from './common';
 
 class DatabaseMigration {
   private static currentVersion = 44;
-  private queryTimeout = 900_000;
+  private queryTimeout = 3600_000;
   private statisticsAddedIndexed = false;
   private uniqueLogs: string[] = [];
 
@@ -403,9 +403,13 @@ class DatabaseMigration {
     }
 
     if (databaseSchemaVersion < 44 && isBitcoin === true) {
-      await this.$executeQuery('TRUNCATE TABLE `blocks_audits`');
       await this.$executeQuery('UPDATE blocks_summaries SET template = NULL');
       this.updateToSchemaVersion(44);
+    }
+
+    if (databaseSchemaVersion < 45 && isBitcoin === true) {
+      await this.$executeQuery('TRUNCATE TABLE `blocks_audits`');
+      this.updateToSchemaVersion(45);
     }
   }
 
